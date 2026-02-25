@@ -8,44 +8,47 @@ async function startServer() {
   const server = http.createServer(app);
   const io = new Server(server, {
     cors: { origin: "*" },
-    maxHttpBufferSize: 1e8 // 100 MB for image/audio uploads
+    maxHttpBufferSize: 1e8 // 100 MB for image/audio/video uploads
   });
   const PORT = 3000;
 
-  // In-memory state for rooms (For production, replace with a database like PostgreSQL/Supabase)
-  // room_id -> { items: [], mood: 'neutral', users: Map<socketId, userName> }
+  // room_id -> { items: [], mood: 'neutral', users: Map<socketId, userName>, type: 'private' | 'group' }
   const rooms = new Map();
 
   io.on("connection", (socket) => {
     let currentRoom = "";
     let currentUser = "";
 
-    socket.on("join_room", ({ roomId, userName }) => {
+    socket.on("join_room", ({ roomId, userName, roomType }) => {
+      if (!rooms.has(roomId)) {
+        rooms.set(roomId, { items: [], mood: "neutral", users: new Map(), type: roomType || 'group' });
+      }
+      const room = rooms.get(roomId);
+
+      if (room.type === 'private' && room.users.size >= 2 && !room.users.has(socket.id)) {
+        socket.emit("room_full");
+        return;
+      }
+
       currentRoom = roomId;
       currentUser = userName;
       socket.join(roomId);
 
-      if (!rooms.has(roomId)) {
-        rooms.set(roomId, { items: [], mood: "neutral", users: new Map() });
-      }
-      const room = rooms.get(roomId);
       room.users.set(socket.id, userName);
 
-      // Send current state to the joining user
       socket.emit("room_state", {
         items: room.items,
         mood: room.mood,
         users: Array.from(room.users.values()),
+        type: room.type
       });
 
-      // Notify others in the room
       socket.to(roomId).emit("users_update", Array.from(room.users.values()));
     });
 
     socket.on("add_item", (item) => {
       if (!currentRoom) return;
       const room = rooms.get(currentRoom);
-      // Idempotency check
       if (!room.items.find((i: any) => i.id === item.id)) {
         room.items.push(item);
         io.to(currentRoom).emit("item_added", item);
@@ -76,6 +79,11 @@ async function startServer() {
       io.to(currentRoom).emit("mood_changed", mood);
     });
 
+    socket.on("game_action", (action) => {
+      if (!currentRoom) return;
+      io.to(currentRoom).emit("game_action", action);
+    });
+
     socket.on("disconnect", () => {
       if (currentRoom && rooms.has(currentRoom)) {
         const room = rooms.get(currentRoom);
@@ -85,12 +93,10 @@ async function startServer() {
     });
   });
 
-  // API routes FIRST
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

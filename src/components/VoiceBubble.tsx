@@ -7,13 +7,16 @@ import Reactions from './Reactions';
 interface Props {
   key?: string | number;
   item: RoomItem;
+  currentUser: string;
   removeItem: (id: string) => void;
   onReact: (id: string, emoji: string) => void;
+  onMove: (id: string, x: number, y: number) => void;
 }
 
-export default function VoiceBubble({ item, removeItem, onReact }: Props) {
+export default function VoiceBubble({ item, currentUser, removeItem, onReact, onMove }: Props) {
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const isAuthor = item.author === currentUser;
 
   useEffect(() => {
     if (item.content && item.content !== 'voice_mock') {
@@ -50,17 +53,20 @@ export default function VoiceBubble({ item, removeItem, onReact }: Props) {
       drag
       dragMomentum={false}
       initial={{ x: item.x, y: item.y, scale: 0 }}
-      animate={{ scale: 1 }}
+      animate={{ x: item.x, y: item.y, scale: 1 }}
+      onDragEnd={(e, info) => onMove(item.id, item.x + info.offset.x, item.y + info.offset.y)}
       className="absolute cursor-grab active:cursor-grabbing group"
       style={{ zIndex: 15 }}
       whileDrag={{ scale: 1.1, zIndex: 50 }}
     >
-      <button 
-        onClick={() => removeItem(item.id)}
-        className="absolute -top-2 -right-2 bg-deep text-cream rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity z-20"
-      >
-        <X size={12} />
-      </button>
+      {isAuthor && (
+        <button 
+          onClick={() => removeItem(item.id)}
+          className="absolute -top-2 -right-2 bg-deep text-cream rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity z-20"
+        >
+          <X size={12} />
+        </button>
+      )}
       
       <div 
         onClick={togglePlay}

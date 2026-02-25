@@ -1,4 +1,4 @@
-export type ItemType = 'sticky' | 'photo' | 'voice';
+export type ItemType = 'sticky' | 'photo' | 'voice' | 'video';
 
 export interface Reaction {
   emoji: string;
@@ -13,9 +13,11 @@ export interface RoomItem {
   y: number;
   content?: string;
   color?: string;
+  fontFamily?: string;
   rotation?: number;
   author?: string;
   reactions?: Reaction[];
 }
 
 export type Mood = 'neutral' | 'calm' | 'energetic' | 'melancholy' | 'warm';
+export type RoomType = 'private' | 'group';

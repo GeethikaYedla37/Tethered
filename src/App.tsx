@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Image as ImageIcon, Mic, Sparkles, Square, Send } from 'lucide-react';
+import { Image as ImageIcon, Mic, Sparkles, Square, Send, Video, Settings, Gamepad2 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
-import { RoomItem, Mood } from './types';
+import { RoomItem, Mood, RoomType } from './types';
 
 import Sticky from './components/StickyNote';
 import Photo from './components/PhotoFrame';
 import Voice from './components/VoiceBubble';
+import VideoPlayer from './components/VideoPlayer';
 import MoodSelector from './components/MoodSelector';
 import AuthPage from './components/AuthPage';
+import SettingsModal from './components/SettingsModal';
+import GameWidget from './components/GameWidget';
 
 const MOOD_COLORS: Record<Mood, string> = {
   neutral: 'var(--color-cream)',
@@ -35,6 +38,7 @@ export default function App() {
   const [view, setView] = useState<'auth' | 'room'>('auth');
   const [userName, setUserName] = useState('');
   const [roomId, setRoomId] = useState('');
+  const [roomType, setRoomType] = useState<RoomType>('group');
 
   const [socket, setSocket] = useState<Socket | null>(null);
   const [users, setUsers] = useState<string[]>([]);
@@ -45,16 +49,27 @@ export default function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [chatInput, setChatInput] = useState('');
   
+  const [showSettings, setShowSettings] = useState(false);
+  const [showGame, setShowGame] = useState(false);
+  const [settings, setSettings] = useState({ color: 'bg-gold', font: 'font-sans' });
+  
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (view === 'room') {
       const newSocket = io();
       setSocket(newSocket);
 
-      newSocket.emit('join_room', { roomId, userName });
+      newSocket.emit('join_room', { roomId, userName, roomType });
+
+      newSocket.on('room_full', () => {
+        alert("This private room is full (max 2 people).");
+        setView('auth');
+        newSocket.disconnect();
+      });
 
       newSocket.on('room_state', (state) => {
         setItems(state.items);
@@ -89,9 +104,9 @@ export default function App() {
         newSocket.disconnect();
       };
     }
-  }, [view, roomId, userName]);
+  }, [view, roomId, userName, roomType]);
 
-  const addItem = (type: RoomItem['type'], content?: string, color?: string) => {
+  const addItem = (type: RoomItem['type'], content?: string, color?: string, fontFamily?: string) => {
     const newItem: RoomItem = {
       id: Date.now().toString() + Math.random().toString(36).substring(7),
       type,
@@ -99,6 +114,7 @@ export default function App() {
       y: window.innerHeight / 2 - 100 + (Math.random() * 100 - 50),
       content,
       color,
+      fontFamily,
       rotation: Math.random() * 10 - 5,
       author: userName,
       reactions: []
@@ -112,6 +128,10 @@ export default function App() {
 
   const removeItem = (id: string) => {
     socket?.emit('remove_item', id);
+  };
+
+  const handleMove = (id: string, x: number, y: number) => {
+    updateItem(id, { x, y });
   };
 
   const handleReact = (id: string, emoji: string) => {
@@ -155,12 +175,20 @@ export default function App() {
     }
   };
 
+  const handleVideoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const base64 = await fileToBase64(file);
+      addItem('video', base64);
+    }
+    if (videoInputRef.current) {
+      videoInputRef.current.value = '';
+    }
+  };
+
   const handleChatSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (chatInput.trim()) {
-      const colors = ['bg-gold', 'bg-blush', 'bg-sage', 'bg-white'];
-      const randomColor = colors[Math.floor(Math.random() * colors.length)];
-      
       const x = Math.random() * (window.innerWidth - 300) + 100;
       const y = Math.random() * (window.innerHeight - 300) + 100;
 
@@ -169,7 +197,8 @@ export default function App() {
         type: 'sticky',
         x, y,
         content: chatInput.trim(),
-        color: randomColor,
+        color: settings.color,
+        fontFamily: settings.font,
         rotation: Math.random() * 10 - 5,
         author: userName,
         reactions: []
@@ -216,9 +245,10 @@ export default function App() {
   };
 
   if (view === 'auth') {
-    return <AuthPage onEnter={(name, code) => {
+    return <AuthPage onEnter={(name, code, type) => {
       setUserName(name);
       setRoomId(code);
+      setRoomType(type);
       setView('room');
     }} />;
   }
@@ -271,20 +301,27 @@ export default function App() {
         <AnimatePresence>
           {items.map(item => {
             if (item.type === 'sticky') {
-              return <Sticky key={item.id} item={item} updateItem={updateItem} removeItem={removeItem} onReact={handleReact} />;
+              return <Sticky key={item.id} item={item} currentUser={userName} updateItem={updateItem} removeItem={removeItem} onReact={handleReact} onMove={handleMove} />;
             }
             if (item.type === 'photo') {
-              return <Photo key={item.id} item={item} removeItem={removeItem} onReact={handleReact} onReplace={handleReplacePhoto} />;
+              return <Photo key={item.id} item={item} currentUser={userName} removeItem={removeItem} onReact={handleReact} onReplace={handleReplacePhoto} onMove={handleMove} />;
             }
             if (item.type === 'voice') {
-              return <Voice key={item.id} item={item} removeItem={removeItem} onReact={handleReact} />;
+              return <Voice key={item.id} item={item} currentUser={userName} removeItem={removeItem} onReact={handleReact} onMove={handleMove} />;
+            }
+            if (item.type === 'video') {
+              return <VideoPlayer key={item.id} item={item} currentUser={userName} removeItem={removeItem} onReact={handleReact} onMove={handleMove} />;
             }
             return null;
           })}
         </AnimatePresence>
       </div>
 
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white/80 backdrop-blur-xl px-4 py-3 rounded-full shadow-2xl border border-white/40 flex items-center gap-2 z-50 w-[90%] max-w-2xl">
+      {showGame && (
+        <GameWidget socket={socket} currentUser={userName} onClose={() => setShowGame(false)} />
+      )}
+
+      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white/80 backdrop-blur-xl px-4 py-3 rounded-full shadow-2xl border border-white/40 flex items-center gap-2 z-50 w-[90%] max-w-4xl">
         
         <form onSubmit={handleChatSubmit} className="flex-1 flex items-center bg-white/50 border border-black/10 rounded-full px-4 py-2 focus-within:border-gold/50 transition-colors">
           <input 
@@ -301,50 +338,43 @@ export default function App() {
 
         <div className="w-px h-8 bg-black/10 mx-2" />
 
-        <input 
-          type="file" 
-          accept="image/*" 
-          className="hidden" 
-          ref={fileInputRef} 
-          onChange={handleFileChange} 
-        />
-        <button 
-          onClick={() => fileInputRef.current?.click()} 
-          className="p-2.5 hover:bg-black/5 rounded-full transition-colors text-deep group relative"
-          title="Add Photo"
-        >
+        <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
+        <button onClick={() => fileInputRef.current?.click()} className="p-2.5 hover:bg-black/5 rounded-full transition-colors text-deep group relative" title="Add Photo">
           <ImageIcon size={20} />
           <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-deep text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">Photo</span>
         </button>
-        <button 
-          onClick={toggleRecording} 
-          className={`p-2.5 rounded-full transition-colors group relative ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'hover:bg-black/5 text-deep'}`}
-          title={isRecording ? "Stop Recording" : "Record Voice"}
-        >
+
+        <input type="file" accept="video/*" className="hidden" ref={videoInputRef} onChange={handleVideoChange} />
+        <button onClick={() => videoInputRef.current?.click()} className="p-2.5 hover:bg-black/5 rounded-full transition-colors text-deep group relative" title="Add Video">
+          <Video size={20} />
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-deep text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">Video</span>
+        </button>
+
+        <button onClick={toggleRecording} className={`p-2.5 rounded-full transition-colors group relative ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'hover:bg-black/5 text-deep'}`} title={isRecording ? "Stop Recording" : "Record Voice"}>
           {isRecording ? <Square size={20} fill="currentColor" /> : <Mic size={20} />}
-          <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-deep text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-            {isRecording ? 'Stop' : 'Voice'}
-          </span>
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-deep text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">{isRecording ? 'Stop' : 'Voice'}</span>
         </button>
         
         <div className="w-px h-8 bg-black/10 mx-2" />
         
-        <button 
-          onClick={() => setShowMood(!showMood)} 
-          className={`p-2.5 rounded-full transition-colors group relative ${showMood ? 'bg-gold/20 text-amber' : 'hover:bg-black/5 text-deep'}`}
-          title="Change Mood"
-        >
+        <button onClick={() => setShowGame(!showGame)} className={`p-2.5 rounded-full transition-colors group relative ${showGame ? 'bg-gold/20 text-amber' : 'hover:bg-black/5 text-deep'}`} title="Play Game">
+          <Gamepad2 size={20} />
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-deep text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">Game</span>
+        </button>
+
+        <button onClick={() => setShowMood(!showMood)} className={`p-2.5 rounded-full transition-colors group relative ${showMood ? 'bg-gold/20 text-amber' : 'hover:bg-black/5 text-deep'}`} title="Change Mood">
           <Sparkles size={20} />
           <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-deep text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">Mood</span>
         </button>
+
+        <button onClick={() => setShowSettings(true)} className="p-2.5 hover:bg-black/5 rounded-full transition-colors text-deep group relative" title="Settings">
+          <Settings size={20} />
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-deep text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">Settings</span>
+        </button>
       </div>
 
-      <MoodSelector 
-        currentMood={mood} 
-        setMood={handleSetMood} 
-        isOpen={showMood} 
-        onClose={() => setShowMood(false)} 
-      />
+      <MoodSelector currentMood={mood} setMood={handleSetMood} isOpen={showMood} onClose={() => setShowMood(false)} />
+      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} settings={settings} setSettings={setSettings} />
     </div>
   );
 }

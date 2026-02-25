@@ -1,7 +1,7 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { motion } from 'motion/react';
 import { RoomItem } from '../types';
-import { X, RefreshCw } from 'lucide-react';
+import { X } from 'lucide-react';
 import Reactions from './Reactions';
 
 interface Props {
@@ -10,23 +10,11 @@ interface Props {
   currentUser: string;
   removeItem: (id: string) => void;
   onReact: (id: string, emoji: string) => void;
-  onReplace: (id: string, file: File) => void;
   onMove: (id: string, x: number, y: number) => void;
 }
 
-export default function PhotoFrame({ item, currentUser, removeItem, onReact, onReplace, onMove }: Props) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
+export default function VideoPlayer({ item, currentUser, removeItem, onReact, onMove }: Props) {
   const isAuthor = item.author === currentUser;
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      onReplace(item.id, file);
-    }
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
 
   return (
     <motion.div
@@ -40,20 +28,6 @@ export default function PhotoFrame({ item, currentUser, removeItem, onReact, onR
       whileDrag={{ scale: 1.05, zIndex: 50, boxShadow: "0 25px 50px -12px rgb(0 0 0 / 0.25)" }}
     >
       <div className="absolute -top-3 -right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
-        <input 
-          type="file" 
-          accept="image/*" 
-          className="hidden" 
-          ref={fileInputRef} 
-          onChange={handleFileChange} 
-        />
-        <button 
-          onClick={() => fileInputRef.current?.click()}
-          className="bg-white text-deep rounded-full p-1.5 shadow-md border border-black/5 hover:bg-gray-50"
-          title="Replace Photo"
-        >
-          <RefreshCw size={14} />
-        </button>
         {isAuthor && (
           <button 
             onClick={() => removeItem(item.id)}
@@ -64,12 +38,12 @@ export default function PhotoFrame({ item, currentUser, removeItem, onReact, onR
         )}
       </div>
       
-      <div className="w-64 h-64 overflow-hidden bg-gray-100 border border-gray-200 relative">
-        <img 
+      <div className="w-64 bg-black relative rounded-sm overflow-hidden">
+        <video 
           src={item.content} 
-          alt="Memory" 
-          className="w-full h-full object-cover pointer-events-none"
-          referrerPolicy="no-referrer"
+          controls 
+          className="w-full h-auto max-h-64 object-contain"
+          playsInline
         />
       </div>
       
