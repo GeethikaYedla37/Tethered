@@ -1,0 +1,109 @@
+import express from "express";
+import { createServer as createViteServer } from "vite";
+import { Server } from "socket.io";
+import http from "http";
+
+async function startServer() {
+  const app = express();
+  const server = http.createServer(app);
+  const io = new Server(server, {
+    cors: { origin: "*" },
+    maxHttpBufferSize: 1e8 // 100 MB for image/audio uploads
+  });
+  const PORT = 3000;
+
+  // In-memory state for rooms (For production, replace with a database like PostgreSQL/Supabase)
+  // room_id -> { items: [], mood: 'neutral', users: Map<socketId, userName> }
+  const rooms = new Map();
+
+  io.on("connection", (socket) => {
+    let currentRoom = "";
+    let currentUser = "";
+
+    socket.on("join_room", ({ roomId, userName }) => {
+      currentRoom = roomId;
+      currentUser = userName;
+      socket.join(roomId);
+
+      if (!rooms.has(roomId)) {
+        rooms.set(roomId, { items: [], mood: "neutral", users: new Map() });
+      }
+      const room = rooms.get(roomId);
+      room.users.set(socket.id, userName);
+
+      // Send current state to the joining user
+      socket.emit("room_state", {
+        items: room.items,
+        mood: room.mood,
+        users: Array.from(room.users.values()),
+      });
+
+      // Notify others in the room
+      socket.to(roomId).emit("users_update", Array.from(room.users.values()));
+    });
+
+    socket.on("add_item", (item) => {
+      if (!currentRoom) return;
+      const room = rooms.get(currentRoom);
+      // Idempotency check
+      if (!room.items.find((i: any) => i.id === item.id)) {
+        room.items.push(item);
+        io.to(currentRoom).emit("item_added", item);
+      }
+    });
+
+    socket.on("update_item", ({ id, updates }) => {
+      if (!currentRoom) return;
+      const room = rooms.get(currentRoom);
+      const index = room.items.findIndex((i: any) => i.id === id);
+      if (index !== -1) {
+        room.items[index] = { ...room.items[index], ...updates };
+        io.to(currentRoom).emit("item_updated", { id, updates });
+      }
+    });
+
+    socket.on("remove_item", (id) => {
+      if (!currentRoom) return;
+      const room = rooms.get(currentRoom);
+      room.items = room.items.filter((i: any) => i.id !== id);
+      io.to(currentRoom).emit("item_removed", id);
+    });
+
+    socket.on("change_mood", (mood) => {
+      if (!currentRoom) return;
+      const room = rooms.get(currentRoom);
+      room.mood = mood;
+      io.to(currentRoom).emit("mood_changed", mood);
+    });
+
+    socket.on("disconnect", () => {
+      if (currentRoom && rooms.has(currentRoom)) {
+        const room = rooms.get(currentRoom);
+        room.users.delete(socket.id);
+        io.to(currentRoom).emit("users_update", Array.from(room.users.values()));
+      }
+    });
+  });
+
+  // API routes FIRST
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok" });
+  });
+
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    app.use(express.static("dist"));
+  }
+
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer();

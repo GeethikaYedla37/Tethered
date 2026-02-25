@@ -1,0 +1,5 @@
+{
+  "name": "Tethered",
+  "description": "A private digital room for long-distance friendships.",
+  "requestFramePermissions": ["microphone"]
+}
